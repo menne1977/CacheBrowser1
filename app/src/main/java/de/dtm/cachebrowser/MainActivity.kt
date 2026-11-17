@@ -12,6 +12,7 @@ import android.view.inputmethod.EditorInfo
 import android.webkit.*
 import android.widget.*
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONArray
 import java.io.File
@@ -34,6 +35,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var panelText: TextView
 
     private var liveJson = "[]"
+    private var fileCb: ValueCallback<Array<Uri>>? = null
+    @Volatile private var trustedPage = false
+
+    private val chooser = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        fileCb?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(res.resultCode, res.data))
+        fileCb = null
+    }
     private val requestLog = ArrayDeque<String>()
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.GERMANY)
 
@@ -72,9 +80,11 @@ class MainActivity : AppCompatActivity() {
         }
         val go = Button(this).apply { text = "Go" }
         val cacheBtn = Button(this).apply { text = "Cache" }
+        val playerBtn = Button(this).apply { text = "Player" }
         bar.addView(urlBar, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         bar.addView(go)
         bar.addView(cacheBtn)
+        bar.addView(playerBtn)
 
         val frame = FrameLayout(this)
         web = WebView(this)
@@ -104,10 +114,25 @@ class MainActivity : AppCompatActivity() {
             cacheMode = WebSettings.LOAD_DEFAULT
         }
         web.addJavascriptInterface(Bridge(), "DTM")
-        web.webChromeClient = WebChromeClient()
+        web.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                w: WebView, cb: ValueCallback<Array<Uri>>, params: FileChooserParams
+            ): Boolean {
+                fileCb?.onReceiveValue(null)
+                fileCb = cb
+                return try {
+                    chooser.launch(params.createIntent())
+                    true
+                } catch (e: Exception) {
+                    fileCb = null
+                    false
+                }
+            }
+        }
         web.webViewClient = object : WebViewClient() {
             override fun onPageStarted(v: WebView, url: String, f: android.graphics.Bitmap?) {
                 urlBar.setText(url)
+                trustedPage = url.startsWith("file:///android_asset/")
             }
             override fun onPageFinished(v: WebView, url: String) {
                 v.evaluateJavascript(patchJs, null)
@@ -154,6 +179,10 @@ class MainActivity : AppCompatActivity() {
             if (panel.visibility == View.VISIBLE) panel.visibility = View.GONE
             else { panel.visibility = View.VISIBLE; refreshPanel() }
         }
+        playerBtn.setOnClickListener {
+            panel.visibility = View.GONE
+            web.loadUrl("file:///android_asset/stream-auswaehler.html")
+        }
         clear.setOnClickListener { web.clearCache(true); refreshPanel() }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -174,6 +203,20 @@ class MainActivity : AppCompatActivity() {
         fun media(json: String) {
             liveJson = json
             runOnUiThread { if (panel.visibility == View.VISIBLE) refreshPanel() }
+        }
+
+        /** Nur für die mitgelieferte Player-Seite (Assets): schreibt Dateien stückweise in den App-Downloads-Ordner. */
+        @JavascriptInterface
+        fun saveChunk(name: String, b64: String, first: Boolean) {
+            if (!trustedPage) return
+            try {
+                val dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return
+                var safe = name.substringAfterLast('/').trim()
+                if (safe.isEmpty() || safe == "." || safe == "..") safe = "stream"
+                java.io.FileOutputStream(File(dir, safe), !first).use {
+                    it.write(android.util.Base64.decode(b64, android.util.Base64.DEFAULT))
+                }
+            } catch (e: Exception) { }
         }
     }
 
