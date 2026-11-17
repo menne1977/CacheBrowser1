@@ -65,7 +65,7 @@ class MainActivity : AppCompatActivity() {
             hint = "URL oder Suchbegriff"
             setSingleLine()
             imeOptions = EditorInfo.IME_ACTION_GO
-            setText("https://bandcamp.com")
+            setText("https://www.google.com")
         }
         val go = Button(this).apply { text = "Go" }
         val cacheBtn = Button(this).apply { text = "Cache" }
