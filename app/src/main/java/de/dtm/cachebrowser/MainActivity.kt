@@ -1,6 +1,9 @@
 package de.dtm.cachebrowser
 
 import android.annotation.SuppressLint
+import android.app.DownloadManager
+import android.net.Uri
+import android.os.Environment
 import android.graphics.Typeface
 import android.os.Bundle
 import android.text.format.Formatter
@@ -122,6 +125,19 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        web.setDownloadListener { url, ua, cd, mime, _ ->
+            val name = URLUtil.guessFileName(url, cd, mime)
+            val req = DownloadManager.Request(Uri.parse(url)).apply {
+                addRequestHeader("User-Agent", ua)
+                CookieManager.getInstance().getCookie(url)?.let { addRequestHeader("Cookie", it) }
+                setMimeType(mime)
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setDestinationInExternalFilesDir(this@MainActivity, Environment.DIRECTORY_DOWNLOADS, name)
+            }
+            (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).enqueue(req)
+            Toast.makeText(this, "Download: $name", Toast.LENGTH_SHORT).show()
+        }
+
         fun load() {
             val t = urlBar.text.toString().trim()
             val target = when {
@@ -190,6 +206,12 @@ class MainActivity : AppCompatActivity() {
 
         sb.append("\n=== MEDIEN-ANFRAGEN (zuletzt) ===\n")
         synchronized(requestLog) { if (requestLog.isEmpty()) sb.append("-\n") else requestLog.forEach { sb.append(it).append('\n') } }
+
+        val dl = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+        sb.append("\n=== DOWNLOADS ===\n").append(dl?.absolutePath ?: "-").append('\n')
+        dl?.listFiles()?.sortedByDescending { it.lastModified() }?.forEach {
+            sb.append(Formatter.formatShortFileSize(this, it.length())).append("  ").append(it.name).append('\n')
+        }
 
         sb.append("\n=== HTTP-CACHE (Dateien im App-Cache) ===\n")
         val entries = scanCache()
